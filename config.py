@@ -17,7 +17,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN', '8772849103:AAFgv4YIOlq9Fpv3iFdw0tL20nR73Iro9
 # PAYMENT SETTINGS
 # ========================================
 # Cost in Telegram Stars to see who liked you
-STARS_TO_SEE_LIKES = 10
+STARS_TO_SEE_LIKES = 1
 
 # ========================================
 # CUSTOMIZATION

@@ -11,6 +11,8 @@ from telegram.ext import (
 )
 from database import Database
 from config import *
+from cities import get_city_keyboard, get_city_name, get_city_display
+from admin import admin_command, admin_callback
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -50,6 +52,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💬 My Matches", callback_data="matches")],
         [InlineKeyboardButton("👀 Who Liked Me", callback_data="who_liked_me")],
         [InlineKeyboardButton("👤 My Profile", callback_data="profile")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -108,17 +111,98 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif state == STATES['REGISTRATION_PHOTO']:
         if update.message.photo:
-            photo_id = update.message.photo[-1].file_id
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
+            file_size_mb = file.file_size / (1024 * 1024)
+            
+            if file_size_mb > 10:
+                await update.message.reply_text(
+                    f"❌ Фото слишком большое! Максимум 10 МБ.\n"
+                    f"Текущий размер: {file_size_mb:.1f} МБ\n\n"
+                    f"Пожалуйста, отправьте фото меньшего размера или /skip"
+                )
+                return
+            
+            photo_id = photo.file_id
             data['photo_id'] = photo_id
             db.set_user_state(user_id, STATES['REGISTRATION_CITY'], data)
-            await update.message.reply_text("Perfect! What city are you in? (Or type /skip)")
+            
+            cities = get_city_keyboard()
+            keyboard = []
+            for i in range(0, len(cities), 2):
+                row = []
+                row.append(InlineKeyboardButton(cities[i]['display'], callback_data=f"city_{cities[i]['id']}"))
+                if i + 1 < len(cities):
+                    row.append(InlineKeyboardButton(cities[i+1]['display'], callback_data=f"city_{cities[i+1]['id']}"))
+                keyboard.append(row)
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "Perfect! В каком городе вы находитесь?\n\nВыберите город из списка:",
+                reply_markup=reply_markup
+            )
         else:
             await update.message.reply_text("Please send a photo or type /skip")
     
     elif state == STATES['REGISTRATION_CITY']:
-        city = update.message.text.strip()
-        data['city'] = city
-        await complete_registration(update, context, data)
+        await update.message.reply_text("Пожалуйста, выберите город из списка кнопок выше.")
+    
+    elif state == 'EDIT_NAME':
+        new_name = update.message.text.strip()
+        conn = db.get_connection()
+        conn.execute('UPDATE users SET name = ? WHERE user_id = ?', (new_name, user_id))
+        conn.commit()
+        conn.close()
+        db.clear_user_state(user_id)
+        await update.message.reply_text(f"✅ Имя изменено на: {new_name}")
+        await show_main_menu(update, context)
+    
+    elif state == 'EDIT_AGE':
+        try:
+            new_age = int(update.message.text.strip())
+            if 18 <= new_age <= 100:
+                conn = db.get_connection()
+                conn.execute('UPDATE users SET age = ? WHERE user_id = ?', (new_age, user_id))
+                conn.commit()
+                conn.close()
+                db.clear_user_state(user_id)
+                await update.message.reply_text(f"✅ Возраст изменён на: {new_age}")
+                await show_main_menu(update, context)
+            else:
+                await update.message.reply_text("Введите возраст от 18 до 100")
+        except ValueError:
+            await update.message.reply_text("Введите корректный возраст (число)")
+    
+    elif state == 'EDIT_BIO':
+        new_bio = update.message.text.strip()
+        conn = db.get_connection()
+        conn.execute('UPDATE users SET bio = ? WHERE user_id = ?', (new_bio, user_id))
+        conn.commit()
+        conn.close()
+        db.clear_user_state(user_id)
+        await update.message.reply_text("✅ Описание обновлено!")
+        await show_main_menu(update, context)
+    
+    elif state == 'EDIT_PHOTO':
+        if update.message.photo:
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
+            file_size_mb = file.file_size / (1024 * 1024)
+            
+            if file_size_mb > 10:
+                await update.message.reply_text("❌ Фото слишком большое! Максимум 10 МБ.\nТекущий размер: {file_size_mb:.1f} МБ")
+                return
+            
+            new_photo_id = photo.file_id
+            conn = db.get_connection()
+            conn.execute('UPDATE users SET photo_id = ? WHERE user_id = ?', (new_photo_id, user_id))
+            conn.commit()
+            conn.close()
+            db.clear_user_state(user_id)
+            await update.message.reply_text("✅ Фото обновлено!")
+            await show_main_menu(update, context)
+        else:
+            await update.message.reply_text("Пожалуйста, отправьте фото")
     
     elif state == STATES['CHATTING']:
         if data and 'chat_with' in data:
@@ -130,14 +214,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             db.save_message(user_id, chat_with_id, update.message.text)
-            await update.message.reply_text("✅ Message sent!")
+            db.update_message_stats(user_id, chat_with_id)
+            await update.message.reply_text("✅ Сообщение отправлено!")
             
             try:
                 chat_with_user = db.get_user(chat_with_id)
                 await context.bot.send_message(
                     chat_id=chat_with_id,
-                    text=f"💬 New message from {db.get_user(user_id)['name']}:\n\n{update.message.text}\n\n"
-                         f"Reply with /chat_{user_id} to continue the conversation"
+                    text=f"💬 Новое сообщение от {db.get_user(user_id)['name']}:\n\n{update.message.text}\n\n"
+                         f"Ответьте через My Matches → {db.get_user(user_id)['name']}"
                 )
             except Exception as e:
                 logger.error(f"Failed to send notification: {e}")
@@ -155,7 +240,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif action == "like":
         candidate_id = int(data_parts[1])
+        db.update_like_stats(user_id, candidate_id)
         is_match = db.add_like(user_id, candidate_id)
+        
+        if is_match:
+            db.update_match_stats(user_id, candidate_id)
         
         if is_match:
             candidate = db.get_user(candidate_id)
@@ -230,10 +319,82 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif action == "who":
         await show_who_liked_me(update, context)
+    
+    elif action == "city":
+        state, reg_data = db.get_user_state(user_id)
+        if state == STATES['REGISTRATION_CITY']:
+            city_id = data_parts[1]
+            city_name = get_city_name(city_id)
+            reg_data['city'] = city_name
+            reg_data['city_id'] = city_id
+            await complete_registration(update, context, reg_data)
+        else:
+            city_id = data_parts[1]
+            city_name = get_city_name(city_id)
+            db.get_connection().execute(
+                'UPDATE users SET city = ? WHERE user_id = ?',
+                (city_name, user_id)
+            )
+            db.get_connection().commit()
+            db.clear_user_state(user_id)
+            await query.answer(f"Город изменён на {get_city_display(city_id)}")
+            await show_profile(update, context)
+    
+    elif action == "edit":
+        field = data_parts[1] if len(data_parts) > 1 else None
+        if field == "profile":
+            await start_profile_edit(update, context)
+        elif field == "name":
+            db.set_user_state(user_id, 'EDIT_NAME', {})
+            await query.edit_message_text("Введите новое имя:")
+        elif field == "age":
+            db.set_user_state(user_id, 'EDIT_AGE', {})
+            await query.edit_message_text("Введите новый возраст:")
+        elif field == "bio":
+            db.set_user_state(user_id, 'EDIT_BIO', {})
+            await query.edit_message_text("Введите новое описание:")
+        elif field == "photo":
+            db.set_user_state(user_id, 'EDIT_PHOTO', {})
+            await query.edit_message_text("Отправьте новое фото:")
+        elif field == "city":
+            cities = get_city_keyboard()
+            keyboard = []
+            for i in range(0, len(cities), 2):
+                row = []
+                row.append(InlineKeyboardButton(cities[i]['display'], callback_data=f"city_{cities[i]['id']}"))
+                if i + 1 < len(cities):
+                    row.append(InlineKeyboardButton(cities[i+1]['display'], callback_data=f"city_{cities[i+1]['id']}"))
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="edit_profile")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Выберите новый город:", reply_markup=reply_markup)
+        else:
+            await start_profile_edit(update, context)
+    
+    elif action == "writemsg":
+        chat_with_id = int(data_parts[1])
+        await query.answer("Теперь просто напишите сообщение в чат! ✍️")
+        db.set_user_state(user_id, STATES['CHATTING'], {'chat_with': chat_with_id})
+    
+    elif action == "settings":
+        await show_settings(update, context)
+    
+    elif action == "agefilter":
+        await show_age_filter(update, context)
+    
+    elif action == "setage":
+        min_age = int(data_parts[1])
+        max_age = int(data_parts[2])
+        db.set_age_filter(user_id, min_age, max_age)
+        await query.answer(f"✅ Фильтр установлен: {min_age}-{max_age} лет")
+        await show_settings(update, context)
 
 async def show_next_candidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     candidates = db.get_candidates(user_id, limit=1)
+    
+    if candidates:
+        db.track_profile_view(user_id, candidates[0]['user_id'])
     
     if not candidates:
         keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]]
@@ -333,6 +494,7 @@ async def start_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_wi
     chat_with = db.get_user(chat_with_id)
     
     keyboard = [
+        [InlineKeyboardButton("✍️ Написать сообщение", callback_data=f"writemsg_{chat_with_id}")],
         [InlineKeyboardButton("📜 View Chat History", callback_data=f"viewchat_{chat_with_id}")],
         [InlineKeyboardButton("🔙 Back to Matches", callback_data="matches")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]
@@ -340,9 +502,10 @@ async def start_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_wi
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.callback_query.edit_message_text(
-        f"💬 Chatting with {chat_with['name']}\n\n"
-        f"Send your message below! All messages will be delivered directly to {chat_with['name']}.\n\n"
-        f"To exit chat mode, use the buttons below.",
+        f"💬 Общение с {chat_with['name']}\n\n"
+        f"Нажмите '✍️ Написать сообщение' и отправьте текст в чат.\n"
+        f"Все сообщения будут доставлены {chat_with['name']}.\n\n"
+        f"Для выхода из режима чата используйте кнопки ниже.",
         reply_markup=reply_markup
     )
 
@@ -385,7 +548,10 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Bio: {user.get('bio', 'No bio')}"
     )
     
-    keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]]
+    keyboard = [
+        [InlineKeyboardButton("✏️ Редактировать профиль", callback_data="edit_profile")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if user.get('photo_id'):
@@ -485,6 +651,61 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
     
     await show_who_liked_me(update, context)
 
+async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    min_age = user.get('min_age', 18)
+    max_age = user.get('max_age', 100)
+    
+    keyboard = [
+        [InlineKeyboardButton(f"🎂 Возраст: {min_age}-{max_age} лет", callback_data="agefilter")],
+        [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    text = (
+        "⚙️ **Настройки**\n\n"
+        f"Текущий фильтр возраста: **{min_age}-{max_age} лет**\n\n"
+        "Нажмите на кнопку чтобы изменить фильтр."
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def show_age_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("18-25", callback_data="setage_18_25"),
+         InlineKeyboardButton("25-35", callback_data="setage_25_35")],
+        [InlineKeyboardButton("35-45", callback_data="setage_35_45"),
+         InlineKeyboardButton("45-60", callback_data="setage_45_60")],
+        [InlineKeyboardButton("18-100 (Все)", callback_data="setage_18_100")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="settings")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.callback_query.edit_message_text(
+        "🎂 Выберите диапазон возраста для поиска:",
+        reply_markup=reply_markup
+    )
+
+async def start_profile_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, field: str = None):
+    user_id = update.effective_user.id
+    
+    keyboard = [
+        [InlineKeyboardButton("📝 Изменить имя", callback_data="edit_name")],
+        [InlineKeyboardButton("🎂 Изменить возраст", callback_data="edit_age")],
+        [InlineKeyboardButton("📍 Изменить город", callback_data="edit_city")],
+        [InlineKeyboardButton("✍️ Изменить био", callback_data="edit_bio")],
+        [InlineKeyboardButton("📸 Изменить фото", callback_data="edit_photo")],
+        [InlineKeyboardButton("🔙 Назад к профилю", callback_data="profile")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.callback_query.edit_message_text(
+        "✏️ Редактирование профиля\n\nВыберите, что хотите изменить:",
+        reply_markup=reply_markup
+    )
+
 async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     state, data = db.get_user_state(user_id)
@@ -539,6 +760,8 @@ def main():
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("skip", skip_command))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
     application.add_handler(CallbackQueryHandler(handle_payment_callback, pattern="^pay_"))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
