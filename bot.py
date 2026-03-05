@@ -92,7 +92,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [
                 [InlineKeyboardButton("👨 Male", callback_data="gender_male")],
                 [InlineKeyboardButton("👩 Female", callback_data="gender_female")],
-                [InlineKeyboardButton("🌈 Other", callback_data="gender_other")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             db.set_user_state(user_id, STATES['REGISTRATION_GENDER'], data)
@@ -331,7 +330,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("👨 Male", callback_data="looking_male")],
             [InlineKeyboardButton("👩 Female", callback_data="looking_female")],
-            [InlineKeyboardButton("🌈 Everyone", callback_data="looking_everyone")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         db.set_user_state(user_id, STATES['REGISTRATION_LOOKING_FOR'], reg_data)
