@@ -5,20 +5,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, 
-    MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, PreCheckoutQueryHandler
 from database import Database
 from config import *
 from cities import get_city_keyboard, get_city_name, get_city_display
 from admin import admin_command, admin_callback
+
+# Bot version - increment to force Railway rebuild
+BOT_VERSION = "2.0.2"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+logger.info(f"Starting bot version {BOT_VERSION}")
 
 db = Database(DATABASE_PATH)
 
