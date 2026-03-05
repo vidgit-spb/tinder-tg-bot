@@ -111,36 +111,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif state == STATES['REGISTRATION_PHOTO']:
         if update.message.photo:
-            photo = update.message.photo[-1]
-            file = await context.bot.get_file(photo.file_id)
-            file_size_mb = file.file_size / (1024 * 1024)
-            
-            if file_size_mb > 10:
+            try:
+                photo = update.message.photo[-1]
+                
+                # Проверка размера файла
+                try:
+                    file = await context.bot.get_file(photo.file_id)
+                    file_size_mb = file.file_size / (1024 * 1024)
+                    
+                    if file_size_mb > 10:
+                        await update.message.reply_text(
+                            f"❌ Фото слишком большое! Максимум 10 МБ.\n"
+                            f"Текущий размер: {file_size_mb:.1f} МБ\n\n"
+                            f"Пожалуйста, отправьте фото меньшего размера или /skip"
+                        )
+                        return
+                except Exception as e:
+                    logger.error(f"Error checking file size: {e}")
+                    # Продолжаем даже если не удалось проверить размер
+                
+                photo_id = photo.file_id
+                data['photo_id'] = photo_id
+                db.set_user_state(user_id, STATES['REGISTRATION_CITY'], data)
+                
+                cities = get_city_keyboard()
+                keyboard = []
+                for i in range(0, len(cities), 2):
+                    row = []
+                    row.append(InlineKeyboardButton(cities[i]['display'], callback_data=f"city_{cities[i]['id']}"))
+                    if i + 1 < len(cities):
+                        row.append(InlineKeyboardButton(cities[i+1]['display'], callback_data=f"city_{cities[i+1]['id']}"))
+                    keyboard.append(row)
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 await update.message.reply_text(
-                    f"❌ Фото слишком большое! Максимум 10 МБ.\n"
-                    f"Текущий размер: {file_size_mb:.1f} МБ\n\n"
-                    f"Пожалуйста, отправьте фото меньшего размера или /skip"
+                    "Perfect! В каком городе вы находитесь?\n\nВыберите город из списка:",
+                    reply_markup=reply_markup
                 )
-                return
-            
-            photo_id = photo.file_id
-            data['photo_id'] = photo_id
-            db.set_user_state(user_id, STATES['REGISTRATION_CITY'], data)
-            
-            cities = get_city_keyboard()
-            keyboard = []
-            for i in range(0, len(cities), 2):
-                row = []
-                row.append(InlineKeyboardButton(cities[i]['display'], callback_data=f"city_{cities[i]['id']}"))
-                if i + 1 < len(cities):
-                    row.append(InlineKeyboardButton(cities[i+1]['display'], callback_data=f"city_{cities[i+1]['id']}"))
-                keyboard.append(row)
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                "Perfect! В каком городе вы находитесь?\n\nВыберите город из списка:",
-                reply_markup=reply_markup
-            )
+            except Exception as e:
+                logger.error(f"Error processing photo: {e}")
+                await update.message.reply_text(
+                    "❌ Ошибка при обработке фото. Попробуйте ещё раз или /skip"
+                )
         else:
             await update.message.reply_text("Please send a photo or type /skip")
     
@@ -185,22 +197,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif state == 'EDIT_PHOTO':
         if update.message.photo:
-            photo = update.message.photo[-1]
-            file = await context.bot.get_file(photo.file_id)
-            file_size_mb = file.file_size / (1024 * 1024)
-            
-            if file_size_mb > 10:
-                await update.message.reply_text("❌ Фото слишком большое! Максимум 10 МБ.\nТекущий размер: {file_size_mb:.1f} МБ")
-                return
-            
-            new_photo_id = photo.file_id
-            conn = db.get_connection()
-            conn.execute('UPDATE users SET photo_id = ? WHERE user_id = ?', (new_photo_id, user_id))
-            conn.commit()
-            conn.close()
-            db.clear_user_state(user_id)
-            await update.message.reply_text("✅ Фото обновлено!")
-            await show_main_menu(update, context)
+            try:
+                photo = update.message.photo[-1]
+                
+                # Проверка размера файла
+                try:
+                    file = await context.bot.get_file(photo.file_id)
+                    file_size_mb = file.file_size / (1024 * 1024)
+                    
+                    if file_size_mb > 10:
+                        await update.message.reply_text(
+                            f"❌ Фото слишком большое! Максимум 10 МБ.\n"
+                            f"Текущий размер: {file_size_mb:.1f} МБ"
+                        )
+                        return
+                except Exception as e:
+                    logger.error(f"Error checking file size: {e}")
+                    # Продолжаем даже если не удалось проверить размер
+                
+                new_photo_id = photo.file_id
+                conn = db.get_connection()
+                conn.execute('UPDATE users SET photo_id = ? WHERE user_id = ?', (new_photo_id, user_id))
+                conn.commit()
+                conn.close()
+                db.clear_user_state(user_id)
+                await update.message.reply_text("✅ Фото обновлено!")
+                await show_main_menu(update, context)
+            except Exception as e:
+                logger.error(f"Error updating photo: {e}")
+                await update.message.reply_text(
+                    "❌ Ошибка при обновлении фото. Попробуйте ещё раз."
+                )
         else:
             await update.message.reply_text("Пожалуйста, отправьте фото")
     
