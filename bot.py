@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, PreCheckoutQueryHandler
 from database import Database
 from config import *
@@ -12,7 +12,7 @@ from cities import get_city_keyboard, get_city_name, get_city_display
 from admin import admin_command, admin_callback
 
 # Bot version - increment to force Railway rebuild
-BOT_VERSION = "2.0.2"
+BOT_VERSION = "2.1.0"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -34,6 +34,21 @@ STATES = {
     'CHATTING': 'chatting',
 }
 
+GIFT_CATALOG = {
+    'rose': {'name': '🌹 Rose'},
+    'heart': {'name': '💖 Heart'},
+    'cake': {'name': '🎂 Cake'},
+}
+
+
+def get_share_link(user_id: int) -> str:
+    username = (BOT_USERNAME or '').strip().replace('@', '')
+    if not username:
+        return 'https://t.me/share/url?url=https://t.me&text=Join%20our%20dating%20bot'
+
+    bot_link = f"https://t.me/{username}?start=ref_{user_id}"
+    return f"https://t.me/share/url?url={bot_link}&text=Join%20me%20in%20this%20dating%20bot"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
@@ -51,10 +66,16 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🔥 Start Swiping", callback_data="swipe")],
         [InlineKeyboardButton("💬 My Matches", callback_data="matches")],
+        [InlineKeyboardButton("🎁 Gifts", callback_data="gifts")],
         [InlineKeyboardButton("👀 Who Liked Me", callback_data="who_liked_me")],
         [InlineKeyboardButton("👤 My Profile", callback_data="profile")],
+        [InlineKeyboardButton("🤝 Share Bot", callback_data="share")],
         [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
     ]
+
+    if MINI_APP_URL:
+        keyboard.insert(0, [InlineKeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     user_data = db.get_user(update.effective_user.id)
@@ -240,7 +261,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.clear_user_state(user_id)
                 return
             
-            db.save_message(user_id, chat_with_id, update.message.text)
+            message_text = (update.message.text or '').strip()
+            if not message_text:
+                await update.message.reply_text("Введите текст сообщения")
+                return
+
+            if len(message_text) > 2000:
+                await update.message.reply_text("Сообщение слишком длинное (макс. 2000 символов)")
+                return
+
+            db.save_message(user_id, chat_with_id, message_text)
             db.update_message_stats(user_id, chat_with_id)
             await update.message.reply_text("✅ Сообщение отправлено!")
             
@@ -248,7 +278,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_with_user = db.get_user(chat_with_id)
                 await context.bot.send_message(
                     chat_id=chat_with_id,
-                    text=f"💬 Новое сообщение от {db.get_user(user_id)['name']}:\n\n{update.message.text}\n\n"
+                    text=f"💬 Новое сообщение от {db.get_user(user_id)['name']}:\n\n{message_text}\n\n"
                          f"Ответьте через My Matches → {db.get_user(user_id)['name']}"
                 )
             except Exception as e:
@@ -308,6 +338,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif action == "matches":
         await show_matches(update, context)
+
+    elif action == "gifts":
+        await show_gift_matches(update, context)
+
+    elif action == "giftto":
+        gift_to_user_id = int(data_parts[1])
+        await show_gift_options(update, context, gift_to_user_id)
+
+    elif action == "sendgift":
+        gift_to_user_id = int(data_parts[1])
+        gift_code = data_parts[2]
+        await send_gift(update, context, gift_to_user_id, gift_code)
+
+    elif action == "receivedgifts":
+        await show_received_gifts(update, context)
+
+    elif action == "share":
+        await show_share_menu(update, context)
     
     elif action == "chat":
         chat_with_id = int(data_parts[1])
@@ -521,6 +569,7 @@ async def start_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_wi
     
     keyboard = [
         [InlineKeyboardButton("✍️ Написать сообщение", callback_data=f"writemsg_{chat_with_id}")],
+        [InlineKeyboardButton("🎁 Отправить подарок", callback_data=f"giftto_{chat_with_id}")],
         [InlineKeyboardButton("📜 View Chat History", callback_data=f"viewchat_{chat_with_id}")],
         [InlineKeyboardButton("🔙 Back to Matches", callback_data="matches")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]
@@ -559,6 +608,109 @@ async def view_chat_history(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.callback_query.edit_message_text(chat_text, reply_markup=reply_markup)
+
+
+async def show_gift_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    matches = db.get_matches(user_id)
+
+    keyboard = []
+    for match in matches[:10]:
+        keyboard.append([InlineKeyboardButton(f"🎁 {match['name']}", callback_data=f"giftto_{match['user_id']}")])
+
+    keyboard.append([InlineKeyboardButton("📥 Received Gifts", callback_data="receivedgifts")])
+    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="menu")])
+
+    text = "Выберите match, чтобы отправить подарок:"
+    if not matches:
+        text = "У вас пока нет matches для отправки подарков."
+
+    await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def show_gift_options(update: Update, context: ContextTypes.DEFAULT_TYPE, gift_to_user_id: int):
+    user_id = update.effective_user.id
+    if not db.is_match(user_id, gift_to_user_id):
+        await update.callback_query.answer("Подарки можно отправлять только match-пользователям", show_alert=True)
+        return
+
+    gift_to_user = db.get_user(gift_to_user_id)
+    keyboard = []
+    for gift_code, gift_data in GIFT_CATALOG.items():
+        keyboard.append([
+            InlineKeyboardButton(gift_data['name'], callback_data=f"sendgift_{gift_to_user_id}_{gift_code}")
+        ])
+
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="gifts")])
+    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="menu")])
+
+    await update.callback_query.edit_message_text(
+        f"Выберите подарок для {gift_to_user['name']}:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def send_gift(update: Update, context: ContextTypes.DEFAULT_TYPE, gift_to_user_id: int, gift_code: str):
+    user_id = update.effective_user.id
+    if not db.is_match(user_id, gift_to_user_id):
+        await update.callback_query.answer("Подарки можно отправлять только match-пользователям", show_alert=True)
+        return
+
+    gift = GIFT_CATALOG.get(gift_code)
+    if not gift:
+        await update.callback_query.answer("Подарок не найден", show_alert=True)
+        return
+
+    db.send_gift(user_id, gift_to_user_id, gift_code, gift['name'])
+
+    try:
+        sender = db.get_user(user_id)
+        await context.bot.send_message(
+            chat_id=gift_to_user_id,
+            text=f"🎁 Вам подарок от {sender['name']}: {gift['name']}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to send gift notification: {e}")
+
+    await update.callback_query.edit_message_text(
+        f"Подарок {gift['name']} отправлен!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 Send another", callback_data=f"giftto_{gift_to_user_id}")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]
+        ])
+    )
+
+
+async def show_received_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    gifts = db.get_received_gifts(user_id, limit=20)
+    if not gifts:
+        text = "У вас пока нет полученных подарков."
+    else:
+        lines = ["📥 Ваши подарки:"]
+        for gift in gifts:
+            lines.append(f"• {gift['gift_name']} от {gift['from_name']}")
+        text = "\n".join(lines)
+
+    await update.callback_query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 Send Gift", callback_data="gifts")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]
+        ])
+    )
+
+
+async def show_share_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    share_url = get_share_link(user_id)
+    await update.callback_query.edit_message_text(
+        "Поделитесь ботом с друзьями:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 Поделиться", url=share_url)],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="menu")]
+        ])
+    )
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -770,6 +922,34 @@ async def complete_registration(update: Update, context: ContextTypes.DEFAULT_TY
     
     await show_main_menu(update, context)
 
+def build_application() -> Application:
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("skip", skip_command))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
+    application.add_handler(CallbackQueryHandler(handle_payment_callback, pattern="^pay_"))
+    application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
+
+    return application
+
+
+def run_bot_polling(in_background_thread: bool = False):
+    application = build_application()
+
+    run_polling_kwargs = {
+        'allowed_updates': Update.ALL_TYPES,
+    }
+    if in_background_thread:
+        run_polling_kwargs['stop_signals'] = None
+
+    application.run_polling(**run_polling_kwargs)
+
+
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("\n" + "="*50)
@@ -782,26 +962,14 @@ def main():
         print("\n" + "="*50 + "\n")
         return
     
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("skip", skip_command))
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
-    application.add_handler(CallbackQueryHandler(handle_payment_callback, pattern="^pay_"))
-    application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
-    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
-    
     print("\n" + "="*50)
     print("🤖 Bot is running!")
     print("="*50)
     print("\n✅ Bot started successfully!")
     print("💬 Open Telegram and start chatting with your bot\n")
     print("="*50 + "\n")
-    
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    run_bot_polling()
 
 if __name__ == '__main__':
     main()

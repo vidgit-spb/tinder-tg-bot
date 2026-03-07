@@ -11,7 +11,23 @@ import os
 # Get your token from @BotFather on Telegram
 # For production: set BOT_TOKEN environment variable
 # For local: use .env file 
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8772849103:AAFgv4YIOlq9Fpv3iFdw0tL20nR73Iro95c')
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+
+# ========================================
+# MINI APP
+# ========================================
+# Public HTTPS URL of your Telegram Mini App (Railway domain)
+MINI_APP_URL = os.getenv('MINI_APP_URL', '')
+
+# Telegram bot username without @ (used for share link)
+BOT_USERNAME = os.getenv('BOT_USERNAME', '')
+
+# ========================================
+# SECURITY
+# ========================================
+# Secret for message encryption at rest in DB
+# Set this in Railway Variables (long random string)
+MESSAGE_ENCRYPTION_KEY = os.getenv('MESSAGE_ENCRYPTION_KEY', '')
 
 # ========================================
 # PAYMENT SETTINGS
@@ -48,7 +64,7 @@ DEFAULT_PROFILE_PHOTO = "assets/default_avatar.png"
 # ========================================
 # DATABASE
 # ========================================
-DATABASE_PATH = "dating_bot.db"
+DATABASE_PATH = os.getenv('DATABASE_PATH', 'dating_bot.db')
 
 # ========================================
 # ADMIN SETTINGS

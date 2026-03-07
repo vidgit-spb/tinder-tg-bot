@@ -1,0 +1,89 @@
+:root {
+  --bg: #f7f4ef;
+  --panel: #fff9f2;
+  --text: #1f1a15;
+  --accent: #c04d2b;
+  --accent-2: #f3b35a;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #f3dfc7 0%, var(--bg) 40%);
+  color: var(--text);
+}
+
+.app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.actions, .row, .swipeButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid #e7d8c3;
+  border-radius: 16px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.status {
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #6c5847;
+}
+
+.card {
+  min-height: 140px;
+  background: #fff;
+  border: 1px solid #e7d8c3;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.chat {
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e7d8c3;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+}
+
+input, textarea, select, button {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #d8c3a8;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+
+button:hover { opacity: 0.92; }
+
+.hidden { display: none; }

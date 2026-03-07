@@ -1,12 +1,47 @@
 import sqlite3
+import os
+import base64
+import hashlib
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 import json
 
+from cryptography.fernet import Fernet, InvalidToken
+
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._message_cipher = self._build_message_cipher()
         self.init_database()
+
+    def _build_message_cipher(self):
+        raw_secret = os.getenv('MESSAGE_ENCRYPTION_KEY', '').strip()
+        if not raw_secret:
+            return None
+
+        # Fernet key must be 32 url-safe base64-encoded bytes.
+        fernet_key = base64.urlsafe_b64encode(hashlib.sha256(raw_secret.encode('utf-8')).digest())
+        return Fernet(fernet_key)
+
+    def _encrypt_message(self, message: str) -> str:
+        if not self._message_cipher:
+            return message
+
+        encrypted = self._message_cipher.encrypt(message.encode('utf-8')).decode('utf-8')
+        return f"enc::{encrypted}"
+
+    def _decrypt_message(self, message: str) -> str:
+        if not isinstance(message, str) or not message.startswith("enc::"):
+            return message
+
+        if not self._message_cipher:
+            return "[Encrypted message unavailable: key is not configured]"
+
+        token = message[len("enc::"):]
+        try:
+            return self._message_cipher.decrypt(token.encode('utf-8')).decode('utf-8')
+        except InvalidToken:
+            return "[Encrypted message unavailable: invalid key]"
     
     def get_connection(self):
         conn = sqlite3.connect(self.db_path)
@@ -41,6 +76,19 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_user_id INTEGER NOT NULL,
                 to_user_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(from_user_id, to_user_id),
+                FOREIGN KEY (from_user_id) REFERENCES users(user_id),
+                FOREIGN KEY (to_user_id) REFERENCES users(user_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS swipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_user_id INTEGER NOT NULL,
+                to_user_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(from_user_id, to_user_id),
                 FOREIGN KEY (from_user_id) REFERENCES users(user_id),
@@ -82,6 +130,20 @@ class Database:
                 payment_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_user_id INTEGER NOT NULL,
+                to_user_id INTEGER NOT NULL,
+                gift_code TEXT NOT NULL,
+                gift_name TEXT NOT NULL,
+                gift_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (from_user_id) REFERENCES users(user_id),
+                FOREIGN KEY (to_user_id) REFERENCES users(user_id)
             )
         ''')
         
@@ -173,6 +235,58 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def get_next_candidate_for_feed(self, user_id: int) -> Optional[Dict]:
+        user = self.get_user(user_id)
+        if not user:
+            return None
+
+        min_age = user.get('min_age', 18)
+        max_age = user.get('max_age', 100)
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM users
+            WHERE user_id != ?
+              AND active = 1
+              AND gender = ?
+              AND age BETWEEN ? AND ?
+              AND user_id NOT IN (
+                  SELECT to_user_id FROM swipes WHERE from_user_id = ?
+              )
+            ORDER BY RANDOM()
+            LIMIT 1
+        ''', (user_id, user['looking_for'], min_age, max_age, user_id))
+
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def record_swipe(self, from_user_id: int, to_user_id: int, action: str):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO swipes (from_user_id, to_user_id, action)
+            VALUES (?, ?, ?)
+        ''', (from_user_id, to_user_id, action))
+        conn.commit()
+        conn.close()
+
+    def is_profile_complete(self, user_id: int) -> bool:
+        user = self.get_user(user_id)
+        if not user:
+            return False
+
+        required_fields = ['name', 'age', 'gender', 'looking_for']
+        for field in required_fields:
+            value = user.get(field)
+            if value is None:
+                return False
+            if isinstance(value, str) and not value.strip():
+                return False
+
+        return True
     
     def add_like(self, from_user_id: int, to_user_id: int) -> bool:
         conn = self.get_connection()
@@ -241,12 +355,13 @@ class Database:
         return result
     
     def save_message(self, from_user_id: int, to_user_id: int, message: str):
+        encrypted_message = self._encrypt_message(message)
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO messages (from_user_id, to_user_id, message)
             VALUES (?, ?, ?)
-        ''', (from_user_id, to_user_id, message))
+        ''', (from_user_id, to_user_id, encrypted_message))
         conn.commit()
         conn.close()
     
@@ -264,7 +379,37 @@ class Database:
         
         rows = cursor.fetchall()
         conn.close()
-        return [dict(row) for row in reversed(rows)]
+
+        messages = [dict(row) for row in reversed(rows)]
+        for message in messages:
+            message['message'] = self._decrypt_message(message.get('message', ''))
+
+        return messages
+
+    def send_gift(self, from_user_id: int, to_user_id: int, gift_code: str, gift_name: str, gift_message: str = ""):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO gifts (from_user_id, to_user_id, gift_code, gift_name, gift_message)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (from_user_id, to_user_id, gift_code, gift_name, gift_message.strip()))
+        conn.commit()
+        conn.close()
+
+    def get_received_gifts(self, user_id: int, limit: int = 20) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT g.*, u.name as from_name
+            FROM gifts g
+            INNER JOIN users u ON u.user_id = g.from_user_id
+            WHERE g.to_user_id = ?
+            ORDER BY g.created_at DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
     
     def get_who_liked_me(self, user_id: int) -> List[Dict]:
         conn = self.get_connection()

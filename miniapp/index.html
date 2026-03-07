@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dating Mini App</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <h1>💕 Dating MVP</h1>
+      <div class="actions">
+        <button id="refreshBtn" type="button">Refresh</button>
+        <button id="shareBtn" type="button">Share</button>
+      </div>
+    </header>
+
+    <section id="status" class="status">Connecting…</section>
+
+    <section id="profileSection" class="panel hidden">
+      <h2>Complete profile</h2>
+      <form id="profileForm">
+        <input name="name" placeholder="Name" required maxlength="64" />
+        <input name="age" type="number" min="18" max="100" placeholder="Age" required />
+        <select name="gender" required>
+          <option value="">Gender</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+        <select name="looking_for" required>
+          <option value="">Looking for</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+        <input name="city" placeholder="City" maxlength="120" />
+        <textarea name="bio" placeholder="Bio" maxlength="500"></textarea>
+        <button type="submit">Save profile</button>
+      </form>
+    </section>
+
+    <section id="swipeSection" class="panel hidden">
+      <h2>Swipe</h2>
+      <article id="candidateCard" class="card"></article>
+      <div class="swipeButtons">
+        <button id="dislikeBtn" type="button">⬅️ Pass</button>
+        <button id="likeBtn" type="button">❤️ Like</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Matches</h2>
+      <div id="matchesList" class="list"></div>
+    </section>
+
+    <section id="chatSection" class="panel hidden">
+      <h2 id="chatTitle">Chat</h2>
+      <div id="chatMessages" class="chat"></div>
+      <div class="row">
+        <input id="chatInput" placeholder="Type message" maxlength="2000" />
+        <button id="sendBtn" type="button">Send</button>
+      </div>
+      <div class="row">
+        <select id="giftSelect">
+          <option value="rose">🌹 Rose</option>
+          <option value="heart">💖 Heart</option>
+          <option value="cake">🎂 Cake</option>
+        </select>
+        <button id="giftBtn" type="button">Send gift</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Received gifts</h2>
+      <div id="giftsList" class="list"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
