@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -932,6 +933,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_payment_callback, pattern="^pay_"))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_message))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
 
@@ -940,14 +942,21 @@ def build_application() -> Application:
 
 def run_bot_polling(in_background_thread: bool = False):
     application = build_application()
+    thread_loop = None
 
     run_polling_kwargs = {
         'allowed_updates': Update.ALL_TYPES,
     }
     if in_background_thread:
+        thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(thread_loop)
         run_polling_kwargs['stop_signals'] = None
 
-    application.run_polling(**run_polling_kwargs)
+    try:
+        application.run_polling(**run_polling_kwargs)
+    finally:
+        if thread_loop is not None and not thread_loop.is_closed():
+            thread_loop.close()
 
 
 def main():
