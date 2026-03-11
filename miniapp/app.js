@@ -33,6 +33,7 @@ const giftsList = document.getElementById("giftsList");
 const myProfileSection = document.getElementById("myProfileSection");
 const myProfileCard = document.getElementById("myProfileCard");
 const languageSelect = document.getElementById("languageSelect");
+const citySuggestions = document.getElementById("citySuggestions");
 
 function t(key, vars = {}) {
   const dict = i18n[state.language] || i18n.en;
@@ -62,7 +63,9 @@ function setStatus(message) { statusEl.textContent = message; }
 async function api(path, options = {}) {
   const headers = options.headers || {};
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  if (options.body && !(options.body instanceof FormData) && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   const response = await fetch(path, { ...options, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.detail || "API error");
@@ -218,6 +221,29 @@ function fillSettingsForm(user) {
   settingsForm.max_age.value = user.max_age || 100;
 }
 
+function validateAges(age, minAge, maxAge) {
+  if (!Number.isFinite(age) || age < 18) return false;
+  if (!Number.isFinite(minAge) || minAge < 18) return false;
+  if (!Number.isFinite(maxAge) || maxAge < 18) return false;
+  if (minAge > maxAge) return false;
+  return true;
+}
+
+async function loadCitySuggestions(query) {
+  const normalized = query.trim();
+  if (normalized.length < 3) {
+    citySuggestions.innerHTML = "";
+    return;
+  }
+  const data = await api(`/api/cities/suggest?query=${encodeURIComponent(normalized)}`);
+  citySuggestions.innerHTML = "";
+  for (const city of data.cities || []) {
+    const option = document.createElement("option");
+    option.value = city;
+    citySuggestions.appendChild(option);
+  }
+}
+
 async function submitProfile(event) {
   event.preventDefault();
   const formData = new FormData(profileForm);
@@ -226,6 +252,10 @@ async function submitProfile(event) {
   payload.age = Number(payload.age);
   payload.min_age = 18;
   payload.max_age = 100;
+  if (!validateAges(payload.age, payload.min_age, payload.max_age)) {
+    setStatus("Age must be 18+");
+    return;
+  }
   if (photoUrl) payload.photo_id = photoUrl;
   await api("/api/profile", { method: "POST", body: JSON.stringify(payload) });
   state.me = await api("/api/me");
@@ -244,6 +274,10 @@ async function submitSettings(event) {
   payload.age = Number(payload.age);
   payload.min_age = Number(payload.min_age);
   payload.max_age = Number(payload.max_age);
+  if (!validateAges(payload.age, payload.min_age, payload.max_age)) {
+    setStatus("Age must be 18+ and partner range must be valid");
+    return;
+  }
   payload.gender = state.me.user.gender;
   payload.looking_for = state.me.user.looking_for;
   const photoUrl = await uploadPhoto(settingsPhotoInput.files[0]);
@@ -279,6 +313,18 @@ function setupSwipeGestures() {
     if (deltaX > 60) doSwipe("like");
     if (deltaX < -60) doSwipe("dislike");
   }, { passive: true });
+}
+
+function setupCityAutocomplete() {
+  const cityInputs = [
+    profileForm.querySelector('input[name="city"]'),
+    settingsForm.querySelector('input[name="city"]'),
+  ];
+  for (const cityInput of cityInputs) {
+    cityInput.addEventListener("input", () => {
+      loadCitySuggestions(cityInput.value).catch(() => {});
+    });
+  }
 }
 
 async function loadLikesHint() {
@@ -343,4 +389,5 @@ languageSelect.addEventListener("change", () => {
   init();
 });
 setupSwipeGestures();
+setupCityAutocomplete();
 init();

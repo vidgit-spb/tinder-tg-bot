@@ -12,13 +12,6 @@
     <header class="topbar">
       <h1>💕 Dating MVP</h1>
       <div class="actions">
-        <select id="languageSelect" aria-label="Language">
-          <option value="en">English</option>
-          <option value="zh">中文</option>
-          <option value="hi">हिंदी</option>
-          <option value="es">Español</option>
-          <option value="ru">Русский</option>
-        </select>
         <button id="settingsBtn" type="button" class="iconButton" title="Settings">⚙️</button>
         <button id="shareBtn" type="button">Share</button>
       </div>
@@ -41,7 +34,7 @@
           <option value="male">Male</option>
           <option value="female">Female</option>
         </select>
-        <input name="city" placeholder="City" maxlength="120" />
+        <input name="city" placeholder="City" maxlength="120" list="citySuggestions" autocomplete="off" />
         <textarea name="bio" placeholder="Bio" maxlength="500"></textarea>
         <label class="fileLabel">
           <span>Photo</span>
@@ -70,8 +63,18 @@
       <form id="settingsForm">
         <input name="name" placeholder="Name" required maxlength="64" />
         <input name="age" type="number" min="18" max="100" placeholder="Age" required />
-        <input name="city" placeholder="City" maxlength="120" />
+        <input name="city" placeholder="City" maxlength="120" list="citySuggestions" autocomplete="off" />
         <textarea name="bio" placeholder="Bio" maxlength="500"></textarea>
+        <label class="fileLabel">
+          <span>Language</span>
+          <select id="languageSelect" aria-label="Language">
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+            <option value="hi">हिंदी</option>
+            <option value="es">Español</option>
+            <option value="ru">Русский</option>
+          </select>
+        </label>
         <div class="row">
           <input name="min_age" type="number" min="18" max="100" placeholder="Partner age from" required />
           <input name="max_age" type="number" min="18" max="100" placeholder="Partner age to" required />
@@ -105,6 +108,7 @@
       <h2 id="receivedGiftsTitle">Received gifts</h2>
       <div id="giftsList" class="list"></div>
     </section>
+    <datalist id="citySuggestions"></datalist>
   </main>
 
   <script src="/static/app.js"></script>

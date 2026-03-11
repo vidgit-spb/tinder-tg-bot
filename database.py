@@ -70,7 +70,14 @@ class Database:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS cities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            )
+        ''')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS likes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +186,56 @@ class Database:
                 data TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
+        ''')
+
+        million_plus_cities = [
+            "Moscow",
+            "Saint Petersburg",
+            "Novosibirsk",
+            "Yekaterinburg",
+            "Kazan",
+            "Nizhny Novgorod",
+            "Chelyabinsk",
+            "Samara",
+            "Omsk",
+            "Rostov-on-Don",
+            "Ufa",
+            "Krasnoyarsk",
+            "Perm",
+            "Voronezh",
+            "Volgograd",
+            "Krasnodar",
+            "Москва",
+            "Санкт-Петербург",
+            "Новосибирск",
+            "Екатеринбург",
+            "Казань",
+            "Нижний Новгород",
+            "Челябинск",
+            "Самара",
+            "Омск",
+            "Ростов-на-Дону",
+            "Уфа",
+            "Красноярск",
+            "Пермь",
+            "Воронеж",
+            "Волгоград",
+            "Краснодар",
+        ]
+        cursor.executemany(
+            "INSERT OR IGNORE INTO cities (name) VALUES (?)",
+            [(city,) for city in million_plus_cities],
+        )
+
+        cursor.execute('''
+            INSERT OR IGNORE INTO matches (user1_id, user2_id)
+            SELECT
+                CASE WHEN l1.from_user_id < l1.to_user_id THEN l1.from_user_id ELSE l1.to_user_id END AS user1_id,
+                CASE WHEN l1.from_user_id < l1.to_user_id THEN l1.to_user_id ELSE l1.from_user_id END AS user2_id
+            FROM likes l1
+            INNER JOIN likes l2
+                ON l2.from_user_id = l1.to_user_id
+               AND l2.to_user_id = l1.from_user_id
         ''')
         
         conn.commit()
@@ -327,13 +384,25 @@ class Database:
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT u.* FROM users u
-            INNER JOIN matches m ON (
+            SELECT DISTINCT
+                u.*,
+                COALESCE(
+                    m.created_at,
+                    CASE
+                        WHEN l1.created_at >= l2.created_at THEN l1.created_at
+                        ELSE l2.created_at
+                    END
+                ) AS matched_at
+            FROM users u
+            LEFT JOIN matches m ON (
                 (m.user1_id = ? AND m.user2_id = u.user_id) OR
                 (m.user2_id = ? AND m.user1_id = u.user_id)
             )
-            ORDER BY m.created_at DESC
-        ''', (user_id, user_id))
+            LEFT JOIN likes l1 ON l1.to_user_id = u.user_id AND l1.from_user_id = ?
+            LEFT JOIN likes l2 ON l2.from_user_id = u.user_id AND l2.to_user_id = ?
+            WHERE m.id IS NOT NULL OR (l1.id IS NOT NULL AND l2.id IS NOT NULL)
+            ORDER BY matched_at DESC
+        ''', (user_id, user_id, user_id, user_id))
         
         rows = cursor.fetchall()
         conn.close()
@@ -350,7 +419,17 @@ class Database:
             SELECT COUNT(*) as count FROM matches 
             WHERE user1_id = ? AND user2_id = ?
         ''', (user_a, user_b))
-        
+        in_matches = cursor.fetchone()['count'] > 0
+
+        if in_matches:
+            conn.close()
+            return True
+
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM likes l1
+            INNER JOIN likes l2 ON l2.from_user_id = l1.to_user_id AND l2.to_user_id = l1.from_user_id
+            WHERE l1.from_user_id = ? AND l1.to_user_id = ?
+        ''', (user1_id, user2_id))
         result = cursor.fetchone()['count'] > 0
         conn.close()
         return result
@@ -687,3 +766,23 @@ class Database:
         ''', (min_age, max_age, user_id))
         conn.commit()
         conn.close()
+
+    def suggest_cities(self, query: str, limit: int = 10) -> List[str]:
+        normalized = (query or "").strip()
+        if len(normalized) < 3:
+            return []
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            SELECT name FROM cities
+            WHERE name LIKE ? COLLATE NOCASE
+            ORDER BY name ASC
+            LIMIT ?
+            ''',
+            (f"{normalized}%", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [row["name"] for row in rows]

@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import parse_qsl
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -459,6 +459,12 @@ def get_likes_inbox_count(claims: Dict[str, Any] = Depends(_get_claims)) -> Dict
     user_id = int(claims["uid"])
     likes = db.get_who_liked_me(user_id)
     return {"count": len(likes)}
+
+
+@app.get("/api/cities/suggest")
+def suggest_cities(query: str = Query(min_length=3, max_length=120)) -> Dict[str, Any]:
+    cities = db.suggest_cities(query, limit=10)
+    return {"cities": cities}
 
 
 @app.get("/api/chat/{other_user_id}")
