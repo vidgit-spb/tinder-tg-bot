@@ -184,16 +184,17 @@ class Database:
         conn.commit()
         conn.close()
     
-    def create_user(self, user_id: int, username: str, first_name: str, 
-                   name: str, age: int, gender: str, looking_for: str, 
-                   bio: str, photo_id: str = None, city: str = None):
+    def create_user(self, user_id: int, username: str, first_name: str,
+                   name: str, age: int, gender: str, looking_for: str,
+                   bio: str, photo_id: str = None, city: str = None,
+                   min_age: int = 18, max_age: int = 100):
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT OR REPLACE INTO users 
-            (user_id, username, first_name, name, age, gender, looking_for, bio, photo_id, city)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, username, first_name, name, age, gender, looking_for, bio, photo_id, city))
+            (user_id, username, first_name, name, age, gender, looking_for, bio, photo_id, city, min_age, max_age)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, username, first_name, name, age, gender, looking_for, bio, photo_id, city, min_age, max_age))
         conn.commit()
         conn.close()
     

@@ -6,12 +6,13 @@ import os
 import asyncio
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qsl
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,8 +31,11 @@ db = Database(DATABASE_PATH)
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "miniapp"
+UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,7 +73,7 @@ def _notify_liked_user(from_user_id: int, to_user_id: int) -> None:
 
     from_user = db.get_user(from_user_id)
     from_name = (from_user or {}).get("name") or "Someone"
-    text = f"❤️ {from_name} liked you!\n\nOpen Mini App to check your likes and matches."
+    text = f"❤️ {from_name} поставил(а) тебе лайк!\n\nУ тебя есть лайк, зайди проверить кто это сделал."
 
     async def _send() -> None:
         bot = Bot(BOT_TOKEN)
@@ -98,6 +102,8 @@ class ProfileUpsertRequest(BaseModel):
     bio: str = Field(default="", max_length=500)
     city: str = Field(default="", max_length=120)
     photo_id: Optional[str] = Field(default=None, max_length=255)
+    min_age: Optional[int] = Field(default=None, ge=18, le=100)
+    max_age: Optional[int] = Field(default=None, ge=18, le=100)
 
 
 class SwipeRequest(BaseModel):
@@ -199,6 +205,8 @@ def _serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
         "bio": user.get("bio") or "",
         "city": user.get("city") or "",
         "photo_id": user.get("photo_id"),
+        "min_age": user.get("min_age", 18),
+        "max_age": user.get("max_age", 100),
     }
 
 
@@ -305,6 +313,10 @@ def upsert_profile(request: ProfileUpsertRequest, claims: Dict[str, Any] = Depen
 
     username = claims.get("username", "") or None
     first_name = claims.get("first_name", "") or ""
+    min_age = request.min_age if request.min_age is not None else (current.get("min_age", 18) if current else 18)
+    max_age = request.max_age if request.max_age is not None else (current.get("max_age", 100) if current else 100)
+    if min_age > max_age:
+        raise HTTPException(status_code=400, detail="min_age must be <= max_age")
 
     if not current:
         db.create_user(
@@ -318,13 +330,15 @@ def upsert_profile(request: ProfileUpsertRequest, claims: Dict[str, Any] = Depen
             bio=request.bio.strip(),
             photo_id=request.photo_id,
             city=request.city.strip() or None,
+            min_age=min_age,
+            max_age=max_age,
         )
     else:
         conn = db.get_connection()
         conn.execute(
             """
             UPDATE users
-            SET name = ?, age = ?, gender = ?, looking_for = ?, bio = ?, city = ?, photo_id = ?, username = ?, first_name = ?
+            SET name = ?, age = ?, gender = ?, looking_for = ?, bio = ?, city = ?, photo_id = ?, username = ?, first_name = ?, min_age = ?, max_age = ?
             WHERE user_id = ?
             """,
             (
@@ -337,6 +351,8 @@ def upsert_profile(request: ProfileUpsertRequest, claims: Dict[str, Any] = Depen
                 request.photo_id,
                 username,
                 first_name,
+                min_age,
+                max_age,
                 user_id,
             ),
         )
@@ -345,6 +361,32 @@ def upsert_profile(request: ProfileUpsertRequest, claims: Dict[str, Any] = Depen
 
     user = db.get_user(user_id)
     return {"ok": True, "user": _serialize_user(user)}
+
+
+@app.post("/api/profile/photo-upload")
+async def upload_profile_photo(
+    request: Request,
+    file: UploadFile = File(...),
+    claims: Dict[str, Any] = Depends(_get_claims),
+) -> Dict[str, str]:
+    _ = claims
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image is too large (max 8MB)")
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        suffix = ".jpg"
+
+    file_name = f"{uuid.uuid4().hex}{suffix}"
+    out_path = UPLOADS_DIR / file_name
+    out_path.write_bytes(content)
+    return {"photo_url": str(request.base_url).rstrip("/") + f"/uploads/{file_name}"}
 
 
 @app.get("/api/feed/next")
@@ -451,10 +493,16 @@ def send_chat_message(
 
 @app.post("/api/gifts/send")
 def send_gift(request: SendGiftRequest, claims: Dict[str, Any] = Depends(_get_claims)) -> Dict[str, Any]:
-    raise HTTPException(
-        status_code=403,
-        detail="Gift sending is available via bot payment flow with Telegram Stars",
-    )
+    user_id = int(claims["uid"])
+    if not db.is_match(user_id, request.to_user_id):
+        raise HTTPException(status_code=403, detail="Gifts allowed only with matches")
+
+    gift_name = GIFT_CATALOG.get(request.gift_code)
+    if not gift_name:
+        raise HTTPException(status_code=400, detail="Unknown gift")
+
+    db.send_gift(user_id, request.to_user_id, request.gift_code, gift_name, request.gift_message)
+    return {"ok": True}
 
 
 @app.get("/api/gifts/received")

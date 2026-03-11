@@ -67,7 +67,7 @@ async def notify_user_liked(context: ContextTypes.DEFAULT_TYPE, from_user_id: in
     try:
         await context.bot.send_message(
             chat_id=to_user_id,
-            text=f"❤️ {sender_name} liked you!\n\nOpen Mini App to check likes and matches.",
+            text=f"❤️ {sender_name} поставил(а) тебе лайк!\n\nУ тебя есть лайк, зайди проверить кто это сделал.",
             reply_markup=get_open_mini_app_markup(),
         )
     except Exception as e:
