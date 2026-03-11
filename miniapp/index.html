@@ -12,7 +12,6 @@
     <header class="topbar">
       <h1>💕 Dating MVP</h1>
       <div class="actions">
-        <button id="settingsBtn" type="button" class="iconButton" title="Settings">⚙️</button>
         <button id="shareBtn" type="button">Share</button>
       </div>
     </header>
@@ -34,11 +33,11 @@
           <option value="male">Male</option>
           <option value="female">Female</option>
         </select>
-        <input name="city" placeholder="City" maxlength="120" list="citySuggestions" autocomplete="off" />
+        <input name="city" placeholder="City" maxlength="120" list="citySuggestions" autocomplete="new-password" />
         <textarea name="bio" placeholder="Bio" maxlength="500"></textarea>
         <label class="fileLabel">
           <span>Photo</span>
-          <input id="profilePhotoInput" name="photo_file" type="file" accept="image/*" />
+          <input id="profilePhotoInput" name="photo_file" type="file" accept="image/*" multiple />
         </label>
         <button type="submit">Save profile</button>
       </form>
@@ -63,7 +62,7 @@
       <form id="settingsForm">
         <input name="name" placeholder="Name" required maxlength="64" />
         <input name="age" type="number" min="18" max="100" placeholder="Age" required />
-        <input name="city" placeholder="City" maxlength="120" list="citySuggestions" autocomplete="off" />
+        <input name="city" placeholder="City" maxlength="120" list="citySuggestions" autocomplete="new-password" />
         <textarea name="bio" placeholder="Bio" maxlength="500"></textarea>
         <label class="fileLabel">
           <span>Language</span>
@@ -80,34 +79,41 @@
           <input name="max_age" type="number" min="18" max="100" placeholder="Partner age to" required />
         </div>
         <label class="fileLabel">
-          <span>Update photo</span>
-          <input id="settingsPhotoInput" name="photo_file" type="file" accept="image/*" />
+          <span>Update photos</span>
+          <input id="settingsPhotoInput" name="photo_file" type="file" accept="image/*" multiple />
         </label>
         <div class="row">
           <button type="submit">Save settings</button>
-          <button id="closeSettingsBtn" type="button">Close</button>
         </div>
       </form>
     </section>
 
-    <section class="panel">
+    <section id="messagesSection" class="panel hidden">
       <h2 id="matchesTitle">Matches</h2>
       <div id="matchesList" class="list"></div>
+
+      <section id="chatSection" class="hidden">
+        <h3 id="chatTitle">Chat</h3>
+        <div id="chatMessages" class="chat"></div>
+        <div class="chatComposer">
+          <textarea id="chatInput" placeholder="Type message" maxlength="2000" rows="3"></textarea>
+          <button id="sendBtn" type="button">Send</button>
+        </div>
+      </section>
     </section>
 
-    <section id="chatSection" class="panel hidden">
-      <h2 id="chatTitle">Chat</h2>
-      <div id="chatMessages" class="chat"></div>
-      <div class="row">
-        <input id="chatInput" placeholder="Type message" maxlength="2000" />
-        <button id="sendBtn" type="button">Send</button>
-      </div>
-    </section>
-
-    <section class="panel">
+    <section id="giftsSection" class="panel hidden">
       <h2 id="receivedGiftsTitle">Received gifts</h2>
       <div id="giftsList" class="list"></div>
     </section>
+
+    <nav id="bottomNav" class="bottomNav hidden">
+      <button id="navSettingsBtn" type="button" class="navBtn">⚙️ Settings</button>
+      <button id="navMessagesBtn" type="button" class="navBtn">💬 Messages</button>
+      <button id="navSwipeBtn" type="button" class="navBtn">❤️ Swipe</button>
+    </nav>
+    <div class="bottomNavSpacer"></div>
+
     <datalist id="citySuggestions"></datalist>
   </main>
 

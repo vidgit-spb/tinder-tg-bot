@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-from config import BOT_TOKEN, BOT_USERNAME, DATABASE_PATH, MINI_APP_URL
+from config import ADMIN_USER_IDS, BOT_TOKEN, BOT_USERNAME, DATABASE_PATH, MINI_APP_URL
 from database import Database
 from bot import run_bot_polling
 
@@ -71,9 +71,7 @@ def _notify_liked_user(from_user_id: int, to_user_id: int) -> None:
     if from_user_id == to_user_id:
         return
 
-    from_user = db.get_user(from_user_id)
-    from_name = (from_user or {}).get("name") or "Someone"
-    text = f"❤️ {from_name} поставил(а) тебе лайк!\n\nУ тебя есть лайк, зайди проверить кто это сделал."
+    text = "❤️ У тебя новый лайк!\n\nЗайди в Mini App и проверь, кто это сделал."
 
     async def _send() -> None:
         bot = Bot(BOT_TOKEN)
@@ -101,7 +99,7 @@ class ProfileUpsertRequest(BaseModel):
     looking_for: str = Field(pattern="^(male|female)$")
     bio: str = Field(default="", max_length=500)
     city: str = Field(default="", max_length=120)
-    photo_id: Optional[str] = Field(default=None, max_length=255)
+    photo_id: Optional[str] = Field(default=None, max_length=4000)
     min_age: Optional[int] = Field(default=None, ge=18, le=100)
     max_age: Optional[int] = Field(default=None, ge=18, le=100)
 
@@ -232,6 +230,13 @@ def _get_claims(authorization: Optional[str] = Header(default=None, alias="Autho
         raise HTTPException(status_code=401, detail="Missing token")
 
     return _parse_session_token(token)
+
+
+def _require_admin(claims: Dict[str, Any]) -> None:
+    user_id = int(claims["uid"])
+    allowed = {int(v) for v in ADMIN_USER_IDS}
+    if user_id not in allowed:
+        raise HTTPException(status_code=403, detail="Admin only")
 
 
 @app.get("/")
@@ -465,6 +470,55 @@ def get_likes_inbox_count(claims: Dict[str, Any] = Depends(_get_claims)) -> Dict
 def suggest_cities(query: str = Query(min_length=3, max_length=120)) -> Dict[str, Any]:
     cities = db.suggest_cities(query, limit=10)
     return {"cities": cities}
+
+
+@app.get("/api/admin/stats")
+def get_admin_stats(claims: Dict[str, Any] = Depends(_get_claims)) -> Dict[str, Any]:
+    _require_admin(claims)
+    return {
+        "stats": db.get_admin_stats(),
+        "top_users": db.get_top_users(limit=20),
+    }
+
+
+@app.get("/api/admin/users")
+def get_admin_users(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    claims: Dict[str, Any] = Depends(_get_claims),
+) -> Dict[str, Any]:
+    _require_admin(claims)
+    conn = db.get_connection()
+    rows = conn.execute(
+        """
+        SELECT
+            u.user_id,
+            u.username,
+            u.first_name,
+            u.name,
+            u.age,
+            u.gender,
+            u.looking_for,
+            u.bio,
+            u.city,
+            u.photo_id,
+            u.created_at,
+            COALESCE(s.total_views, 0) AS total_views,
+            COALESCE(s.total_likes_sent, 0) AS total_likes_sent,
+            COALESCE(s.total_likes_received, 0) AS total_likes_received,
+            COALESCE(s.total_matches, 0) AS total_matches,
+            COALESCE(s.total_messages_sent, 0) AS total_messages_sent,
+            COALESCE(s.total_messages_received, 0) AS total_messages_received,
+            COALESCE(s.last_active, u.created_at) AS last_active
+        FROM users u
+        LEFT JOIN user_statistics s ON s.user_id = u.user_id
+        ORDER BY u.created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    ).fetchall()
+    conn.close()
+    return {"users": [dict(row) for row in rows], "limit": limit, "offset": offset}
 
 
 @app.get("/api/chat/{other_user_id}")

@@ -23,7 +23,7 @@ body {
 .app {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 16px 96px;
 }
 
 .topbar {
@@ -102,6 +102,43 @@ body {
   margin-bottom: 8px;
 }
 
+.chatComposer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+#chatInput {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.chatBubble {
+  max-width: 82%;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.chatBubbleMine {
+  margin-left: auto;
+  background: #ffd9b4;
+  border: 1px solid #efbf8b;
+}
+
+.chatBubbleOther {
+  margin-right: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
+.chatAuthor {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
 .list {
   display: grid;
   gap: 8px;
@@ -160,6 +197,34 @@ button:active { transform: translateY(1px); }
   font-size: 20px;
 }
 
+.bottomNav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: rgba(255, 249, 242, 0.96);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  z-index: 50;
+}
+
+.navBtn {
+  min-height: 46px;
+  font-size: 13px;
+}
+
+.navBtnActive {
+  background: #9d3f22;
+}
+
+.bottomNavSpacer {
+  height: 78px;
+}
+
 @media (min-width: 860px) {
   .app {
     display: grid;
@@ -198,6 +263,16 @@ button:active { transform: translateY(1px); }
   .row,
   .swipeButtons {
     flex-direction: column;
+  }
+
+  .chatComposer {
+    grid-template-columns: 1fr;
+  }
+
+  .bottomNav {
+    padding-left: 8px;
+    padding-right: 8px;
+    gap: 6px;
   }
 }
 

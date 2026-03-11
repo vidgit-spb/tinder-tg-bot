@@ -62,12 +62,10 @@ def get_open_mini_app_markup() -> InlineKeyboardMarkup | None:
 async def notify_user_liked(context: ContextTypes.DEFAULT_TYPE, from_user_id: int, to_user_id: int):
     if from_user_id == to_user_id:
         return
-    sender = db.get_user(from_user_id)
-    sender_name = (sender or {}).get("name") or "Someone"
     try:
         await context.bot.send_message(
             chat_id=to_user_id,
-            text=f"❤️ {sender_name} поставил(а) тебе лайк!\n\nУ тебя есть лайк, зайди проверить кто это сделал.",
+            text="❤️ У тебя новый лайк!\n\nЗайди в Mini App и проверь, кто это сделал.",
             reply_markup=get_open_mini_app_markup(),
         )
     except Exception as e:
