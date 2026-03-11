@@ -12,7 +12,13 @@
     <header class="topbar">
       <h1>💕 Dating MVP</h1>
       <div class="actions">
-        <button id="refreshBtn" type="button">Refresh</button>
+        <select id="languageSelect" aria-label="Language">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+          <option value="hi">हिंदी</option>
+          <option value="es">Español</option>
+          <option value="ru">Русский</option>
+        </select>
         <button id="shareBtn" type="button">Share</button>
       </div>
     </header>
@@ -47,6 +53,11 @@
         <button id="dislikeBtn" type="button">⬅️ Pass</button>
         <button id="likeBtn" type="button">❤️ Like</button>
       </div>
+    </section>
+
+    <section id="myProfileSection" class="panel hidden">
+      <h2>My profile</h2>
+      <div id="myProfileCard" class="card"></div>
     </section>
 
     <section class="panel">

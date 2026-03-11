@@ -13,7 +13,7 @@ from cities import get_city_keyboard, get_city_name, get_city_display
 from admin import admin_command, admin_callback
 
 # Bot version - increment to force Railway rebuild
-BOT_VERSION = "2.1.0"
+BOT_VERSION = "2.2.0"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -36,9 +36,9 @@ STATES = {
 }
 
 GIFT_CATALOG = {
-    'rose': {'name': '🌹 Rose'},
-    'heart': {'name': '💖 Heart'},
-    'cake': {'name': '🎂 Cake'},
+    'rose': {'name': '🌹 Rose', 'stars': 1},
+    'heart': {'name': '💖 Heart', 'stars': 3},
+    'cake': {'name': '🎂 Cake', 'stars': 5},
 }
 
 
@@ -50,9 +50,41 @@ def get_share_link(user_id: int) -> str:
     bot_link = f"https://t.me/{username}?start=ref_{user_id}"
     return f"https://t.me/share/url?url={bot_link}&text=Join%20me%20in%20this%20dating%20bot"
 
+
+def get_open_mini_app_markup() -> InlineKeyboardMarkup | None:
+    if not MINI_APP_URL:
+        return None
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))]
+    ])
+
+
+async def notify_user_liked(context: ContextTypes.DEFAULT_TYPE, from_user_id: int, to_user_id: int):
+    if from_user_id == to_user_id:
+        return
+    sender = db.get_user(from_user_id)
+    sender_name = (sender or {}).get("name") or "Someone"
+    try:
+        await context.bot.send_message(
+            chat_id=to_user_id,
+            text=f"❤️ {sender_name} liked you!\n\nOpen Mini App to check likes and matches.",
+            reply_markup=get_open_mini_app_markup(),
+        )
+    except Exception as e:
+        logger.error(f"Failed to send like notification: {e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    
+
+    if MINI_APP_URL:
+        await update.message.reply_text(
+            "Открой Mini App — свайпы, чат и профиль работают внутри приложения.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))]
+            ])
+        )
+        return
+
     if db.user_exists(user.id):
         await show_main_menu(update, context)
     else:
@@ -300,6 +332,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         candidate_id = int(data_parts[1])
         db.update_like_stats(user_id, candidate_id)
         is_match = db.add_like(user_id, candidate_id)
+        await notify_user_liked(context, user_id, candidate_id)
         
         if is_match:
             db.update_match_stats(user_id, candidate_id)
@@ -350,7 +383,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "sendgift":
         gift_to_user_id = int(data_parts[1])
         gift_code = data_parts[2]
-        await send_gift(update, context, gift_to_user_id, gift_code)
+        await start_gift_payment(update, context, gift_to_user_id, gift_code)
+
+    elif action == "paygift":
+        gift_to_user_id = int(data_parts[1])
+        gift_code = data_parts[2]
+        await start_gift_payment(update, context, gift_to_user_id, gift_code)
 
     elif action == "receivedgifts":
         await show_received_gifts(update, context)
@@ -639,7 +677,10 @@ async def show_gift_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard = []
     for gift_code, gift_data in GIFT_CATALOG.items():
         keyboard.append([
-            InlineKeyboardButton(gift_data['name'], callback_data=f"sendgift_{gift_to_user_id}_{gift_code}")
+            InlineKeyboardButton(
+                f"{gift_data['name']} · {gift_data['stars']}⭐",
+                callback_data=f"paygift_{gift_to_user_id}_{gift_code}"
+            )
         ])
 
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="gifts")])
@@ -717,6 +758,12 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = db.get_user(user_id)
     
+    recent_gifts = db.get_received_gifts(user_id, limit=3)
+    if recent_gifts:
+        gifts_block = "\n".join([f"• {g['gift_name']} от {g['from_name']}" for g in recent_gifts])
+    else:
+        gifts_block = "Пока нет подарков"
+
     profile_text = (
         f"👤 Your Profile\n\n"
         f"Name: {user['name']}\n"
@@ -724,7 +771,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Gender: {user['gender']}\n"
         f"Looking for: {user['looking_for']}\n"
         f"City: {user.get('city', 'Not set')}\n\n"
-        f"Bio: {user.get('bio', 'No bio')}"
+        f"Bio: {user.get('bio', 'No bio')}\n\n"
+        f"🎁 Gifts:\n{gifts_block}"
     )
     
     keyboard = [
@@ -789,16 +837,29 @@ async def handle_payment_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     
     if query.data == "pay_see_likes":
-        await send_invoice(update, context, "see_likes", STARS_TO_SEE_LIKES)
+        payload = f"feature:see_likes:{update.effective_user.id}"
+        await send_invoice(
+            update,
+            context,
+            title="See Who Liked You",
+            description="Unlock the ability to see who liked your profile",
+            payload=payload,
+            label="See Likes",
+            stars=STARS_TO_SEE_LIKES,
+        )
 
-async def send_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE, feature: str, stars: int):
+async def send_invoice(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    title: str,
+    description: str,
+    payload: str,
+    label: str,
+    stars: int,
+):
     user_id = update.effective_user.id
-    
-    title = "See Who Liked You"
-    description = f"Unlock the ability to see who liked your profile"
-    payload = f"{feature}_{user_id}"
     currency = "XTR"
-    prices = [LabeledPrice("See Likes", stars)]
+    prices = [LabeledPrice(label, stars)]
     
     await context.bot.send_invoice(
         chat_id=user_id,
@@ -817,18 +878,64 @@ async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 async def successful_payment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     payment = update.message.successful_payment
-    
-    payload_parts = payment.invoice_payload.split('_')
-    feature = payload_parts[0]
-    
-    db.add_payment(user_id, payment.total_amount, feature, payment.telegram_payment_charge_id)
-    
-    await update.message.reply_text(
-        "✅ Payment successful! Feature unlocked!\n\n"
-        "You can now see who liked you! ❤️"
-    )
-    
-    await show_who_liked_me(update, context)
+
+    payload = payment.invoice_payload or ""
+
+    if payload.startswith("feature:"):
+        payload_parts = payload.split(":")
+        if len(payload_parts) < 3:
+            await update.message.reply_text("✅ Payment received.")
+            return
+
+        feature = payload_parts[1]
+        db.add_payment(user_id, payment.total_amount, feature, payment.telegram_payment_charge_id)
+
+        await update.message.reply_text(
+            "✅ Payment successful! Feature unlocked!\n\n"
+            "You can now see who liked you! ❤️"
+        )
+        await show_who_liked_me(update, context)
+        return
+
+    if payload.startswith("gift:"):
+        payload_parts = payload.split(":")
+        if len(payload_parts) < 4:
+            await update.message.reply_text("✅ Payment received.")
+            return
+
+        from_user_id = int(payload_parts[1])
+        to_user_id = int(payload_parts[2])
+        gift_code = payload_parts[3]
+
+        if from_user_id != user_id:
+            await update.message.reply_text("Платёж отклонён: пользователь не совпадает.")
+            return
+
+        if not db.is_match(from_user_id, to_user_id):
+            await update.message.reply_text("Платёж получен, но пользователь больше не в matches.")
+            return
+
+        gift = GIFT_CATALOG.get(gift_code)
+        if not gift:
+            await update.message.reply_text("Платёж получен, но подарок не найден.")
+            return
+
+        db.send_gift(from_user_id, to_user_id, gift_code, gift['name'])
+        db.add_payment(user_id, payment.total_amount, f"gift_{gift_code}_{to_user_id}", payment.telegram_payment_charge_id)
+
+        try:
+            sender = db.get_user(from_user_id)
+            await context.bot.send_message(
+                chat_id=to_user_id,
+                text=f"🎁 Вам подарок от {sender['name']}: {gift['name']}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send paid gift notification: {e}")
+
+        await update.message.reply_text(f"✅ Подарок {gift['name']} отправлен!")
+        return
+
+    await update.message.reply_text("✅ Payment received.")
 
 async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

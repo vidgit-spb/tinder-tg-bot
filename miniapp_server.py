@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import asyncio
 import threading
 import time
 from pathlib import Path
@@ -15,8 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-from config import BOT_TOKEN, BOT_USERNAME, DATABASE_PATH
+from config import BOT_TOKEN, BOT_USERNAME, DATABASE_PATH, MINI_APP_URL
 from database import Database
 from bot import run_bot_polling
 
@@ -49,6 +51,39 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "") or os.getenv("MESSAGE_ENCRYPTIO
 RUN_BOT_IN_PROCESS = os.getenv("RUN_BOT_IN_PROCESS", "1") == "1"
 
 _bot_thread: Optional[threading.Thread] = None
+
+
+def _build_open_app_markup() -> Optional[InlineKeyboardMarkup]:
+    if not MINI_APP_URL:
+        return None
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))]]
+    )
+
+
+def _notify_liked_user(from_user_id: int, to_user_id: int) -> None:
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        return
+    if from_user_id == to_user_id:
+        return
+
+    from_user = db.get_user(from_user_id)
+    from_name = (from_user or {}).get("name") or "Someone"
+    text = f"❤️ {from_name} liked you!\n\nOpen Mini App to check your likes and matches."
+
+    async def _send() -> None:
+        bot = Bot(BOT_TOKEN)
+        await bot.send_message(
+            chat_id=to_user_id,
+            text=text,
+            reply_markup=_build_open_app_markup(),
+        )
+        await bot.close()
+
+    try:
+        asyncio.run(_send())
+    except Exception:
+        pass
 
 
 class TelegramAuthRequest(BaseModel):
@@ -344,6 +379,7 @@ def swipe(request: SwipeRequest, claims: Dict[str, Any] = Depends(_get_claims)) 
     if request.action == "like":
         db.update_like_stats(user_id, request.to_user_id)
         is_match = db.add_like(user_id, request.to_user_id)
+        _notify_liked_user(user_id, request.to_user_id)
         if is_match:
             db.update_match_stats(user_id, request.to_user_id)
 
@@ -374,6 +410,13 @@ def get_matches(claims: Dict[str, Any] = Depends(_get_claims)) -> Dict[str, Any]
             for m in matches
         ]
     }
+
+
+@app.get("/api/likes/inbox-count")
+def get_likes_inbox_count(claims: Dict[str, Any] = Depends(_get_claims)) -> Dict[str, int]:
+    user_id = int(claims["uid"])
+    likes = db.get_who_liked_me(user_id)
+    return {"count": len(likes)}
 
 
 @app.get("/api/chat/{other_user_id}")
@@ -408,16 +451,10 @@ def send_chat_message(
 
 @app.post("/api/gifts/send")
 def send_gift(request: SendGiftRequest, claims: Dict[str, Any] = Depends(_get_claims)) -> Dict[str, Any]:
-    user_id = int(claims["uid"])
-    if not db.is_match(user_id, request.to_user_id):
-        raise HTTPException(status_code=403, detail="Gifts allowed only with matches")
-
-    gift_name = GIFT_CATALOG.get(request.gift_code)
-    if not gift_name:
-        raise HTTPException(status_code=400, detail="Unknown gift")
-
-    db.send_gift(user_id, request.to_user_id, request.gift_code, gift_name, request.gift_message)
-    return {"ok": True}
+    raise HTTPException(
+        status_code=403,
+        detail="Gift sending is available via bot payment flow with Telegram Stars",
+    )
 
 
 @app.get("/api/gifts/received")
